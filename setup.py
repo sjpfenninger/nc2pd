@@ -14,6 +14,7 @@ setup(
     license='MIT',
     packages=find_packages(),
     install_requires=[
+        "scipy >= 0.15.1",
         "pandas >= 0.15.0",
         "netCDF4 >= 1.1.1"
     ],

@@ -2,7 +2,9 @@
 nc2pd
 ~~~~~
 
-A python-netCDF4 wrapper to turn netCDF files into pandas data structures
+A thin python-netCDF4 wrapper to turn netCDF files into pandas data
+structures, with a focus on extracting time series from regularly
+spatial gridded data (with the ability to interpolate spatially).
 
 Copyright 2015 Stefan Pfenninger
 
@@ -240,7 +242,8 @@ class NetCDFDataset(object):
     def read_timeseries(self, variable, latlon_pairs,
                         start=None, end=None,
                         buffer_size=0,
-                        fixed_dims={}):
+                        fixed_dims={},
+                        return_metadata=False):
         """
         Return a time series for each given lat-lon pair.
 
@@ -260,10 +263,12 @@ class NetCDFDataset(object):
 
         Returns
         -------
-        (data, metadata): a tuple of two pandas DataFrames
-            data contains each requested lat-lon pair as a column, while
-            metadata maps from the requested latitudes/longitudes to
-            grid points and their latitudes/longitudes
+        data : one or two pandas DataFrames
+            the first DataFrame contains each requested lat-lon pair
+            as a column
+            if return_metadata is True, the second DataFrame maps from
+            the requested latitudes/longitudes to grid points and
+            their latitudes/longitudes
 
         """
         gridpoints = self.get_gridpoints(latlon_pairs)
@@ -294,7 +299,12 @@ class NetCDFDataset(object):
         md['lat_gridpoint'] = [self.lat_array[i] for i in md['y_gridpoint']]
         md['lon_gridpoint'] = [self.lon_array[i] for i in md['x_gridpoint']]
 
-        return (pd.concat(dfs, axis=1), md)
+        data = pd.concat(dfs, axis=1)
+
+        if return_metadata:
+            return (data, md)
+        else:
+            return data
 
     def read_boundingbox(self, variable, latlon_pairs,
                          start=None, end=None,
