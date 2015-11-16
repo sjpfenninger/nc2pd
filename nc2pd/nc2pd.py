@@ -138,6 +138,9 @@ class NetCDFDataset(object):
         If include_end is True, the returned range is 1 longer so that
         the final timestep given in the range is included in slicing.
 
+        If the desired end point is not found in the data, the most recent
+        available end point is used.
+
         """
         if start:
             try:
@@ -151,6 +154,16 @@ class NetCDFDataset(object):
                 end_idx = self.datetimes[end].ix[-1]
             except AttributeError:  # because it's a single value already
                 end_idx = self.datetimes[end]
+            except IndexError:  # because we've hit a missing datetime entry
+                # First get closest available end index
+                end_idx = np.argmin(np.abs(self.datetimes.index.to_pydatetime() -
+                                           pd.datetools.parse(end)))
+                # Now check if this is beyond the desired end date, and if so,
+                # move back one in the list of existing datetimes, which
+                # will put us within the desired endpoint (given that the
+                # desired endpoint didn't exist in the first place!)
+                if self.datetimes.index[end_idx] > pd.datetools.parse(end):
+                    end_idx = end_idx - 1
         else:
             end_idx = self.datetimes.ix[-1]
         if include_end:
