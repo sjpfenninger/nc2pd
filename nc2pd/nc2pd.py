@@ -16,6 +16,7 @@ from __future__ import print_function
 from __future__ import division
 from __future__ import unicode_literals
 
+import itertools
 
 import numpy as np
 import pandas as pd
@@ -92,7 +93,7 @@ class NetCDFDataset(object):
         labels = pd.Series(range(len(dates)), index=dates)
         return labels
 
-    def _find_coordinates(self, lat, lon):
+    def _find_coordinates(self, lat, lon, bounds=False):
         """
         Finds the index of given lat/lon pair in the dataset.
 
@@ -112,24 +113,38 @@ class NetCDFDataset(object):
             x and y (lon and lat) coordinate indices
 
         """
-        def _find_closest(array, value):
+        def _find_closest(array, value, bounds):
             """Searches array for value and returns the index of the entry
             closest to value."""
-            return (np.abs(array - value)).argmin()
+            if bounds:
+                pos = np.searchsorted(array, value)
+                return (pos - 1, pos)
+            else:
+                return (np.abs(array - value)).argmin()
 
         if lon in self.lon_array:
             x = np.argmax(self.lon_array == lon)
+            if bounds:
+                x = (x, x)
         else:
-            x = _find_closest(self.lon_array, lon)
+            x = _find_closest(self.lon_array, lon, bounds)
         if lat in self.lat_array:
             y = np.argmax(self.lat_array == lat)
+            if bounds:
+                y = (y, y)
         else:
-            y = _find_closest(self.lat_array, lat)
-        return x, y
+            y = _find_closest(self.lat_array, lat, bounds)
+        # Return either a single x, y pair or a list of pairs: [(x, y)]
+        if bounds:
+            return list(zip(x, y))
+        else:
+            return (x, y)
 
-    def get_gridpoints(self, latlon_pairs):
+    def get_gridpoints(self, latlon_pairs, bounds=False):
         """Take a list of lat-lon pairs and return a list of x-y indices."""
-        return [self._find_coordinates(lat, lon) for lat, lon in latlon_pairs]
+        points = [self._find_coordinates(lat, lon, bounds)
+                  for lat, lon in latlon_pairs]
+        return [i for i in itertools.chain.from_iterable(points)]
 
     def get_timerange(self, start=None, end=None, include_end=True):
         """
@@ -321,7 +336,7 @@ class NetCDFDataset(object):
 
     def read_boundingbox(self, variable, latlon_pairs,
                          start=None, end=None,
-                         buffer_size=1,
+                         buffer_size=0,
                          fixed_dims={}):
         """
         Return a time-lat-lon panel encompassing all the given lat-lon pairs,
@@ -337,7 +352,7 @@ class NetCDFDataset(object):
             datetime string of the form 'YYYY-MM-DD hh:mm' or similar
         end : str, default None
             datetime string, like for start
-        buffer_size : int, default 1
+        buffer_size : int, default 0
             Grid points by which to extend the bounding box around the
             outermost points. Set to 0 to disable.
         fixed_dims : dict, default {}
@@ -345,19 +360,13 @@ class NetCDFDataset(object):
             e.g. {'level': 0}
 
         """
-        gridpoints = self.get_gridpoints(latlon_pairs)
+        gridpoints = self.get_gridpoints(latlon_pairs, bounds=True)
         timerange = self.get_timerange(start, end)
 
         # Get bounding box
-        x_from, x_to, y_from, y_to = [], [], [], []
-        for x, y in gridpoints:
-            x_from.append(x - buffer_size)
-            x_to.append(x + 1 + buffer_size)
-            y_from.append(y - buffer_size)
-            y_to.append(y + 1 + buffer_size)
-
-        x_slice = (min(x_from), max(x_to))
-        y_slice = (min(y_from), max(y_to))
+        x, y = list(zip(*gridpoints))
+        x_slice = (min(x) - buffer_size, max(x) + 1 + buffer_size)
+        y_slice = (min(y) - buffer_size, max(y) + 1 + buffer_size)
 
         panel = self.read_data(variable,
                                x_range=x_slice,
@@ -369,7 +378,7 @@ class NetCDFDataset(object):
 
     def read_interpolated_timeseries(self, variable, latlon_pairs,
                                      start=None, end=None,
-                                     buffer_size=1,
+                                     buffer_size=0,
                                      order=1, **kwargs):
         """
         Return an interpolated time series for each given lat-lon pair.
@@ -420,10 +429,12 @@ def spatial_interpolation(data, latlon_pairs, order=1, **kwargs):
 
     """
     # lat, lon to array dimensions y, z
-    lat_m = interpolate.interp1d(data.major_axis,
-                                 list(range(len(data.major_axis))))
-    lon_m = interpolate.interp1d(data.minor_axis,
-                                 list(range(len(data.minor_axis))))
+    m = {}
+    for var, dim in [('y', data.major_axis), ('z', data.minor_axis)]:
+        try:
+            m[var] = interpolate.interp1d(dim, list(range(len(dim))))
+        except ValueError:  # Raised if there is only one entry
+            m[var] = lambda x: 0  # 0 is the only index that exists
 
     # x dimension is time, we want ALL timesteps from the data
     x = list(range(len(data.items)))
@@ -432,8 +443,8 @@ def spatial_interpolation(data, latlon_pairs, order=1, **kwargs):
 
     # do the actual interpolation to y, z array coordinates
     for lat, lon in latlon_pairs:
-        y = np.ones_like(x) * lat_m(lat)
-        z = np.ones_like(x) * lon_m(lon)
+        y = np.ones_like(x) * m['y'](lat)
+        z = np.ones_like(x) * m['z'](lon)
 
         interp = ndimage.map_coordinates(data.as_matrix(), [x, y, z],
                                          order=order, **kwargs)
