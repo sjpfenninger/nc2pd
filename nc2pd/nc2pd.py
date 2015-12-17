@@ -453,5 +453,11 @@ def spatial_interpolation(data, latlon_pairs, order=1, **kwargs):
 
     df = pd.concat(results, axis=1)
     df.index = data.items
+
+    # If latlon_pairs contains only one pair, we ensure it's a tuple
+    # because we'd try to set two columns otherwise
+    if len(latlon_pairs) == 1:
+        latlon_pairs = tuple(latlon_pairs)
     df.columns = latlon_pairs
+
     return df
