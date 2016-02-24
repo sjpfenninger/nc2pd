@@ -24,6 +24,11 @@ from scipy import interpolate, ndimage
 from netCDF4 import Dataset, num2date
 
 
+def parse_time_string(string):
+    # datetools.parse_time_string returns a list of datetime objects
+    return pd.datetools.parse_time_string(string)[0]
+
+
 class NetCDFDataset(object):
     """NetCDFDataset"""
     def __init__(self, path):
@@ -144,7 +149,10 @@ class NetCDFDataset(object):
         """Take a list of lat-lon pairs and return a list of x-y indices."""
         points = [self._find_coordinates(lat, lon, bounds)
                   for lat, lon in latlon_pairs]
-        return [i for i in itertools.chain.from_iterable(points)]
+        result = [i for i in itertools.chain.from_iterable(points)]
+        if len(latlon_pairs) == 1 and not bounds:
+            result = [result]
+        return result
 
     def get_timerange(self, start=None, end=None, include_end=True):
         """
@@ -172,12 +180,12 @@ class NetCDFDataset(object):
             except IndexError:  # because we've hit a missing datetime entry
                 # First get closest available end index
                 end_idx = np.argmin(np.abs(self.datetimes.index.to_pydatetime() -
-                                           pd.datetools.parse(end)))
+                                           parse_time_string(end)))
                 # Now check if this is beyond the desired end date, and if so,
                 # move back one in the list of existing datetimes, which
                 # will put us within the desired endpoint (given that the
                 # desired endpoint didn't exist in the first place!)
-                if self.datetimes.index[end_idx] > pd.datetools.parse(end):
+                if self.datetimes.index[end_idx] > parse_time_string(end):
                     end_idx = end_idx - 1
         else:
             end_idx = self.datetimes.ix[-1]
